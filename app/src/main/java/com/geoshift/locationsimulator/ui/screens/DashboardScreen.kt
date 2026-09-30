@@ -82,7 +82,6 @@ fun DashboardScreen(
     val simulationMode by viewModel.simulationMode.collectAsState()
     val realDeviceLocation by viewModel.realDeviceLocation.collectAsState()
     val fixInfo by viewModel.fixInfo.collectAsState()
-    val speedMultiplier by viewModel.speedMultiplier.collectAsState()
 
     var isFavorite by remember { mutableStateOf(false) }
     var isExpandedSheet by remember { mutableStateOf(true) }
@@ -251,34 +250,6 @@ fun DashboardScreen(
                                 value = "±${"%.1f".format(currentLocation.accuracy)} m",
                                 modifier = Modifier.weight(0.8f)
                             )
-                        }
-
-                        // Pilihan Multiplier Kecepatan
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val multipliers = listOf(1.0f, 2.0f, 5.0f, 10.0f)
-                            multipliers.forEach { mult ->
-                                val isSelected = (speedMultiplier == mult)
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isSelected) PrimaryCyan else SurfaceContainerHigh)
-                                        .clickable { viewModel.setSpeed(mult) }
-                                        .padding(vertical = 6.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "${mult.toInt()}x Kecepatan",
-                                        fontSize = 10.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isSelected) Color(0xFF003543) else MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
                         }
                     }
                 }
