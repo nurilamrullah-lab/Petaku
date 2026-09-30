@@ -340,33 +340,6 @@ fun TacticalMapCanvas(
                 }
             }
 
-            // Fokus ke Pin Target Terpilih
-            Surface(
-                shape = CircleShape,
-                color = SurfaceContainer.copy(alpha = 0.95f),
-                tonalElevation = 6.dp,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, OutlineHairline),
-                modifier = Modifier.size(46.dp)
-            ) {
-                IconButton(
-                    onClick = {
-                        val pt = GeoPoint(location.latitude, location.longitude)
-                        mapViewInstance?.controller?.animateTo(pt)
-                        mapViewInstance?.controller?.setZoom(17.0)
-                        mapViewInstance?.postInvalidate()
-                    },
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.GpsFixed,
-                        contentDescription = "Fokus Pin Target",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
-
             // Lokasi Saya Asli (Real Device Hardware GPS)
             Surface(
                 shape = CircleShape,
