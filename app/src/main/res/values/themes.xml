@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.GeoShift" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0B111E</item>
+        <item name="android:navigationBarColor">#080E1B</item>
+        <item name="android:windowBackground">#0B111E</item>
+    </style>
+</resources>

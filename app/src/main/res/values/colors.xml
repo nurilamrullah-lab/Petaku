@@ -1,0 +1,16 @@
+<resources>
+    <color name="canvas_base">#0B111E</color>
+    <color name="surface_container_lowest">#080E1B</color>
+    <color name="surface_container_low">#161B29</color>
+    <color name="surface_container">#131E32</color>
+    <color name="surface_container_high">#1B2942</color>
+    <color name="surface_container_highest">#2F3543</color>
+    <color name="primary_accent">#00D2FF</color>
+    <color name="secondary_accent">#0A84FF</color>
+    <color name="tertiary_success">#10B981</color>
+    <color name="warning_amber">#F59E0B</color>
+    <color name="destructive_red">#EF4444</color>
+    <color name="outline_hairline">#233452</color>
+    <color name="on_surface">#DDE2F5</color>
+    <color name="on_surface_variant">#BBC9CF</color>
+</resources>
