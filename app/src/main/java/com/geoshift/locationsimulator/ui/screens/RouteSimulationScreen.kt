@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -50,11 +51,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -101,21 +104,31 @@ fun RouteSimulationScreen(
     val realLocation by viewModel.realDeviceLocation.collectAsState()
     val routeProgress by viewModel.routeProgress.collectAsState()
 
-    // Titik Awal (Jemput)
-    var originName by remember { mutableStateOf("Jl. Ikan Paus") }
-    var originLat by remember { mutableStateOf(realLocation?.latitude ?: currentLocation.latitude) }
-    var originLng by remember { mutableStateOf(realLocation?.longitude ?: currentLocation.longitude) }
+    // Titik Awal (Jemput) — rememberSaveable agar rute tidak hilang saat pindah tab
+    var originName by rememberSaveable { mutableStateOf("Lokasi Saat Ini") }
+    var originLat by rememberSaveable { mutableStateOf(realLocation?.latitude ?: currentLocation.latitude) }
+    var originLng by rememberSaveable { mutableStateOf(realLocation?.longitude ?: currentLocation.longitude) }
 
     // Titik Tujuan (Antar)
-    var destName by remember { mutableStateOf("") }
-    var destLat by remember { mutableStateOf<Double?>(null) }
-    var destLng by remember { mutableStateOf<Double?>(null) }
-    var destSearchQuery by remember { mutableStateOf("") }
+    var destName by rememberSaveable { mutableStateOf("") }
+    var destLat by rememberSaveable { mutableStateOf<Double?>(null) }
+    var destLng by rememberSaveable { mutableStateOf<Double?>(null) }
+    var destSearchQuery by rememberSaveable { mutableStateOf("") }
 
     // Moda Transportasi & Kecepatan
-    var transportMode by remember { mutableStateOf("Motor") }
+    var transportMode by rememberSaveable { mutableStateOf("Motor") }
     var isCalculatingRoute by remember { mutableStateOf(false) }
     var calculatedRoute by remember { mutableStateOf<RouteSimulationTrack?>(null) }
+
+    val isSimulationActive = simulationState == SimulationState.RUNNING || simulationState == SimulationState.PAUSED
+
+    // Mengubah rute saat simulasi berjalan akan me-reset progres; minta pengguna menghentikannya dulu
+    fun isRouteLocked(): Boolean {
+        if (isSimulationActive) {
+            Toast.makeText(context, "Hentikan simulasi dulu untuk mengubah rute", Toast.LENGTH_SHORT).show()
+        }
+        return isSimulationActive
+    }
 
     val quickDestinations = listOf(
         "Kopi Kenangan Gajah Mada" to Pair(-8.1818, 113.6853),
@@ -147,7 +160,7 @@ fun RouteSimulationScreen(
 
     fun searchAndSetDestination(query: String) {
         val q = query.trim()
-        if (q.isEmpty()) return
+        if (q.isEmpty() || isRouteLocked()) return
         isCalculatingRoute = true
         coroutineScope.launch {
             val parsedCoord = LocationSearchHelper.parseDirectCoordinates(q)
@@ -166,6 +179,27 @@ fun RouteSimulationScreen(
         }
     }
 
+    // Pulihkan garis rute setelah kembali ke tab ini (objek rute tidak ikut tersimpan)
+    LaunchedEffect(Unit) {
+        val dLat = destLat
+        val dLng = destLng
+        if (dLat != null && dLng != null && calculatedRoute == null) {
+            isCalculatingRoute = true
+            val route = RouteCalculatorHelper.calculateRoadRoute(
+                originName = originName,
+                originLat = originLat,
+                originLng = originLng,
+                destName = destName,
+                destLat = dLat,
+                destLng = dLng
+            )
+            calculatedRoute = route
+            // Jangan reset engine bila simulasi rute sedang berjalan/dijeda
+            if (!isSimulationActive) viewModel.setRoute(route)
+            isCalculatingRoute = false
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // ==========================================
         // 1. FULL MAP BACKGROUND (PETA PENUH LAYAR)
@@ -175,12 +209,13 @@ fun RouteSimulationScreen(
             originLng = originLng,
             destLat = destLat,
             destLng = destLng,
-            simulatedLat = if (simulationState == SimulationState.RUNNING) currentLocation.latitude else null,
-            simulatedLng = if (simulationState == SimulationState.RUNNING) currentLocation.longitude else null,
+            simulatedLat = if (isSimulationActive) currentLocation.latitude else null,
+            simulatedLng = if (isSimulationActive) currentLocation.longitude else null,
             realLocation = realLocation,
             routeTrack = calculatedRoute,
             modifier = Modifier.fillMaxSize(),
             onOriginChanged = { newLat, newLng ->
+                if (isRouteLocked()) return@InDriveRouteMapCanvas
                 originLat = newLat
                 originLng = newLng
                 originName = "Titik Jemput (${"%.4f".format(newLat)}, ${"%.4f".format(newLng)})"
@@ -189,6 +224,7 @@ fun RouteSimulationScreen(
                 }
             },
             onDestChanged = { newLat, newLng ->
+                if (isRouteLocked()) return@InDriveRouteMapCanvas
                 val name = "Tujuan (${"%.4f".format(newLat)}, ${"%.4f".format(newLng)})"
                 calculateRouteToDestination(newLat, newLng, name)
             }
@@ -201,7 +237,8 @@ fun RouteSimulationScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp)
+                .statusBarsPadding()
+                .padding(horizontal = 14.dp, vertical = 8.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(SurfaceContainer.copy(alpha = 0.95f))
                 .border(1.dp, OutlineHairline, RoundedCornerShape(16.dp))
@@ -225,6 +262,7 @@ fun RouteSimulationScreen(
                     if (destLat != null) {
                         IconButton(
                             onClick = {
+                                if (isRouteLocked()) return@IconButton
                                 val tLat = originLat
                                 val tLng = originLng
                                 val tName = originName
@@ -233,9 +271,9 @@ fun RouteSimulationScreen(
                                 originName = destName
                                 calculateRouteToDestination(tLat, tLng, tName)
                             },
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(40.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.SwapVert, contentDescription = "Tukar", tint = SecondaryBlue)
+                            Icon(imageVector = Icons.Default.SwapVert, contentDescription = "Tukar titik jemput dan tujuan", tint = SecondaryBlue)
                         }
                     }
                 }
@@ -271,9 +309,9 @@ fun RouteSimulationScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(SurfaceContainerHigh)
-                                .clickable {
+                                .clickable(onClickLabel = "Pakai lokasi GPS HP sebagai titik jemput") {
                                     val loc = realLocation
-                                    if (loc != null) {
+                                    if (loc != null && !isRouteLocked()) {
                                         originLat = loc.latitude
                                         originLng = loc.longitude
                                         originName = "Lokasi GPS HP"
@@ -282,9 +320,9 @@ fun RouteSimulationScreen(
                                         }
                                     }
                                 }
-                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            Text("GPS HP", fontSize = 9.sp, color = PrimaryCyan)
+                            Text("GPS HP", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = PrimaryCyan)
                         }
                     }
                 }
@@ -449,15 +487,16 @@ fun RouteSimulationScreen(
                         // Tombol Reset / Kembali ke Full Peta
                         IconButton(
                             onClick = {
+                                if (isRouteLocked()) return@IconButton
                                 destLat = null
                                 destLng = null
                                 destName = ""
                                 destSearchQuery = ""
                                 calculatedRoute = null
                             },
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(40.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.Close, contentDescription = "Tutup", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Hapus tujuan", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
 
@@ -574,7 +613,15 @@ fun RouteSimulationScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(text = "Simulasi Sedang Berjalan...", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    text = when (simulationState) {
+                                        SimulationState.RUNNING -> "Simulasi sedang berjalan..."
+                                        SimulationState.PAUSED -> "Simulasi dijeda"
+                                        else -> "Progres terakhir"
+                                    },
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                                 Text(
                                     text = "$completedPercent% (${"%.1f".format(distanceCovered)} / ${"%.1f".format(route.totalDistanceKm)} km)",
                                     fontFamily = FontFamily.Monospace,
@@ -601,7 +648,7 @@ fun RouteSimulationScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        if (simulationState != SimulationState.RUNNING) {
+                        if (!isSimulationActive) {
                             Button(
                                 onClick = {
                                     viewModel.startRouteSimulation(route, context)
@@ -621,20 +668,27 @@ fun RouteSimulationScreen(
                                 Text("Mulai Simulasi Rute", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             }
                         } else {
+                            val isPaused = simulationState == SimulationState.PAUSED
                             Button(
-                                onClick = { viewModel.pauseSimulation() },
+                                onClick = {
+                                    if (isPaused) viewModel.resumeSimulation() else viewModel.pauseSimulation()
+                                },
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(48.dp),
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = WarningAmber,
-                                    contentColor = Color(0xFF332000)
+                                    containerColor = if (isPaused) TertiaryGreen else WarningAmber,
+                                    contentColor = if (isPaused) Color(0xFF003314) else Color(0xFF332000)
                                 )
                             ) {
-                                Icon(imageVector = Icons.Default.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Jeda", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text(if (isPaused) "Lanjutkan" else "Jeda", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             }
 
                             Button(
@@ -695,7 +749,7 @@ private fun InDriveTransportOption(
             )
             Text(
                 text = speed,
-                fontSize = 8.sp,
+                fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 color = if (isSelected) Color(0xFF003543).copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
             )

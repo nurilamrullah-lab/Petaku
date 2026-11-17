@@ -178,4 +178,14 @@ class GeoShiftViewModel : ViewModel() {
     fun toggleFavorite(id: Long, current: Boolean) {
         historyRepo.toggleFavorite(id, current)
     }
+
+    fun toggleCurrentLocationFavorite(): Boolean {
+        val cur = engine.currentLocation.value
+        return historyRepo.toggleFavoriteAt(
+            cur.locationName.ifEmpty { "Titik Favorit" },
+            cur.address.ifEmpty { "%.5f, %.5f".format(cur.latitude, cur.longitude) },
+            cur.latitude,
+            cur.longitude
+        )
+    }
 }

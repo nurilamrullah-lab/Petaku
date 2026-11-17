@@ -36,6 +36,7 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -89,7 +90,7 @@ fun InDriveRouteMapCanvas(
 
     // Animasi radar fisik
     val infiniteTransition = rememberInfiniteTransition(label = "RadarPulseRoute")
-    val pulseFraction by infiniteTransition.animateFloat(
+    val pulseFraction = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -99,12 +100,15 @@ fun InDriveRouteMapCanvas(
         label = "PulseFractionRoute"
     )
 
-    val realLocOverlay = remember { RealLocationPulseOverlay(realLocation, pulseFraction) }
+    val realLocOverlay = remember { RealLocationPulseOverlay(realLocation) }
     realLocOverlay.realLocation = realLocation
-    realLocOverlay.pulseFraction = pulseFraction
 
-    LaunchedEffect(pulseFraction) {
-        mapViewInstance?.postInvalidate()
+    // Dibaca di coroutine agar tidak me-recompose layar setiap frame animasi
+    LaunchedEffect(realLocOverlay) {
+        snapshotFlow { pulseFraction.value }.collect { fraction ->
+            realLocOverlay.pulseFraction = fraction
+            if (realLocOverlay.realLocation != null) mapViewInstance?.postInvalidate()
+        }
     }
 
     // Google Maps Roadmap tile source
@@ -301,7 +305,7 @@ fun InDriveRouteMapCanvas(
                 },
                 containerColor = SurfaceContainer,
                 contentColor = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(40.dp)
             ) {
                 Icon(imageVector = Icons.Default.Add, contentDescription = "Zoom In", modifier = Modifier.size(18.dp))
             }
@@ -319,7 +323,7 @@ fun InDriveRouteMapCanvas(
                 },
                 containerColor = SurfaceContainer,
                 contentColor = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(40.dp)
             ) {
                 Icon(imageVector = Icons.Default.Remove, contentDescription = "Zoom Out", modifier = Modifier.size(18.dp))
             }
@@ -333,7 +337,7 @@ fun InDriveRouteMapCanvas(
                 },
                 containerColor = TertiaryGreen,
                 contentColor = CanvasBase,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(40.dp)
             ) {
                 Text("A", fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
@@ -347,7 +351,7 @@ fun InDriveRouteMapCanvas(
                     },
                     containerColor = DestructiveRed,
                     contentColor = CanvasBase,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(40.dp)
                 ) {
                     Text("B", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
@@ -363,7 +367,7 @@ fun InDriveRouteMapCanvas(
                     },
                     containerColor = PrimaryCyan,
                     contentColor = CanvasBase,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(40.dp)
                 ) {
                     Icon(imageVector = Icons.Default.MyLocation, contentDescription = "GPS Asli", modifier = Modifier.size(18.dp))
                 }

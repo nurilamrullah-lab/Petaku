@@ -1,10 +1,7 @@
 package com.geoshift.locationsimulator.ui.screens
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,22 +15,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.EditLocation
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.GpsFixed
-import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -45,7 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,22 +47,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.geoshift.locationsimulator.data.model.SimulationState
 import com.geoshift.locationsimulator.ui.components.NavigationTab
 import com.geoshift.locationsimulator.ui.components.TacticalMapCanvas
-import com.geoshift.locationsimulator.ui.theme.CanvasBase
 import com.geoshift.locationsimulator.ui.theme.DestructiveRed
 import com.geoshift.locationsimulator.ui.theme.OutlineHairline
 import com.geoshift.locationsimulator.ui.theme.PrimaryCyan
 import com.geoshift.locationsimulator.ui.theme.SecondaryBlue
 import com.geoshift.locationsimulator.ui.theme.SurfaceContainer
-import com.geoshift.locationsimulator.ui.theme.SurfaceContainerHigh
 import com.geoshift.locationsimulator.ui.theme.SurfaceContainerLowest
 import com.geoshift.locationsimulator.ui.theme.TertiaryGreen
 import com.geoshift.locationsimulator.ui.theme.WarningAmber
 import com.geoshift.locationsimulator.viewmodel.GeoShiftViewModel
+import kotlin.math.abs
 
 @Composable
 fun DashboardScreen(
@@ -82,9 +75,22 @@ fun DashboardScreen(
     val simulationMode by viewModel.simulationMode.collectAsState()
     val realDeviceLocation by viewModel.realDeviceLocation.collectAsState()
     val fixInfo by viewModel.fixInfo.collectAsState()
+    val historyList by viewModel.historyList.collectAsState()
 
-    var isFavorite by remember { mutableStateOf(false) }
-    var isExpandedSheet by remember { mutableStateOf(true) }
+    val isFavorite = historyList.any {
+        it.isFavorite &&
+            abs(it.latitude - currentLocation.latitude) < 0.0001 &&
+            abs(it.longitude - currentLocation.longitude) < 0.0001
+    }
+    var isExpandedSheet by rememberSaveable { mutableStateOf(true) }
+
+    val isRunning = simulationState == SimulationState.RUNNING
+    val isPaused = simulationState == SimulationState.PAUSED
+    val statusColor = when {
+        isRunning -> TertiaryGreen
+        isPaused -> WarningAmber
+        else -> PrimaryCyan
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // ==========================================
@@ -97,6 +103,8 @@ fun DashboardScreen(
             realLocation = realDeviceLocation,
             satellitesInUse = fixInfo.satellitesInUse,
             satellitesInView = fixInfo.satellitesInView,
+            // Info satelit & akurasi sudah tampil di kartu atas/bawah; badge peta akan tertutup kartu
+            showStatusOverlays = false,
             onLocationSelected = { lat, lng, name, address ->
                 viewModel.setLocation(lat, lng, name, address)
             }
@@ -109,11 +117,12 @@ fun DashboardScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp)
+                .statusBarsPadding()
+                .padding(horizontal = 14.dp, vertical = 8.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(SurfaceContainer.copy(alpha = 0.94f))
                 .border(1.dp, OutlineHairline, RoundedCornerShape(16.dp))
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -124,22 +133,26 @@ fun DashboardScreen(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { onNavigateToTab(NavigationTab.SEARCH) }
+                        .clickable(onClickLabel = "Cari lokasi") { onNavigateToTab(NavigationTab.SEARCH) }
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(if (simulationState == SimulationState.RUNNING) TertiaryGreen else PrimaryCyan)
+                                .background(statusColor)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (simulationState == SimulationState.RUNNING) "MOCK AKTIF" else "SIAP SIMULASI",
+                            text = when {
+                                isRunning -> "MOCK AKTIF"
+                                isPaused -> "MOCK DIJEDA"
+                                else -> "SIAP SIMULASI"
+                            },
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
-                            color = if (simulationState == SimulationState.RUNNING) TertiaryGreen else PrimaryCyan
+                            color = statusColor
                         )
                     }
 
@@ -149,6 +162,7 @@ fun DashboardScreen(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 2.dp)
                     )
 
@@ -156,33 +170,42 @@ fun DashboardScreen(
                         text = "${"%.4f".format(currentLocation.latitude)}, ${"%.4f".format(currentLocation.longitude)} · ${fixInfo.satellitesInUse}/${fixInfo.satellitesInView} SATS",
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
-                        color = SecondaryBlue
+                        color = SecondaryBlue,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                // Tombol Aksi Kanan (Cari & Diagnostik)
+                // Tombol Aksi Kanan (Favorit & Cari)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
-                        onClick = { isFavorite = !isFavorite },
-                        modifier = Modifier.size(34.dp)
+                        onClick = {
+                            val saved = viewModel.toggleCurrentLocationFavorite()
+                            Toast.makeText(
+                                context,
+                                if (saved) "Disimpan ke Favorit (lihat tab Riwayat)" else "Dihapus dari Favorit",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        modifier = Modifier.size(44.dp)
                     ) {
                         Icon(
                             imageVector = if (isFavorite) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                            contentDescription = "Favorit",
+                            contentDescription = if (isFavorite) "Hapus dari favorit" else "Simpan ke favorit",
                             tint = if (isFavorite) WarningAmber else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
 
                     IconButton(
                         onClick = { onNavigateToTab(NavigationTab.SEARCH) },
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(44.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Search,
-                            contentDescription = "Cari",
+                            contentDescription = "Cari lokasi",
                             tint = PrimaryCyan,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
@@ -199,18 +222,34 @@ fun DashboardScreen(
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                 .background(SurfaceContainer.copy(alpha = 0.96f))
                 .border(1.dp, OutlineHairline, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Header Mini & Toggle Collapse
-                Row(
+                // Handle & toggle collapse (seluruh baris dapat diketuk)
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { isExpandedSheet = !isExpandedSheet },
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(
+                            onClickLabel = if (isExpandedSheet) "Ciutkan detail" else "Tampilkan detail"
+                        ) { isExpandedSheet = !isExpandedSheet }
+                        .padding(vertical = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .width(36.dp)
+                            .height(4.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             text = "KONTROL SIMULASI LOKASI",
                             fontSize = 11.sp,
@@ -218,19 +257,18 @@ fun DashboardScreen(
                             fontFamily = FontFamily.Monospace,
                             color = PrimaryCyan
                         )
+                        Icon(
+                            imageVector = if (isExpandedSheet) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
-
-                    Icon(
-                        imageVector = if (isExpandedSheet) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                        contentDescription = "Toggle",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
                 }
 
                 // Metrik Telemetri Cards (Koordinat, Elevasi, Akurasi)
                 AnimatedVisibility(visible = isExpandedSheet) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -251,66 +289,101 @@ fun DashboardScreen(
                                 modifier = Modifier.weight(0.8f)
                             )
                         }
+                        Text(
+                            text = "Ketuk atau tahan peta, atau geser pin, untuk memilih titik.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
-                // Tombol Aksi Utama (Mulai / Jeda / Hentikan)
+                // Tombol Aksi Utama (Mulai / Jeda / Lanjutkan / Hentikan)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (simulationState != SimulationState.RUNNING) {
-                        Button(
-                            onClick = { viewModel.startSimulation(context) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(46.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = TertiaryGreen,
-                                contentColor = Color(0xFF003314)
+                    when {
+                        isRunning -> {
+                            Button(
+                                onClick = { viewModel.pauseSimulation() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = WarningAmber,
+                                    contentColor = Color(0xFF332000)
+                                )
+                            ) {
+                                Icon(imageVector = Icons.Default.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Jeda", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                            StopMockButton(
+                                onClick = { viewModel.stopSimulation(context) },
+                                modifier = Modifier.weight(1f)
                             )
-                        ) {
-                            Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Mulai Mock Lokasi", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
-                    } else {
-                        Button(
-                            onClick = { viewModel.pauseSimulation() },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = WarningAmber,
-                                contentColor = Color(0xFF332000)
+                        isPaused -> {
+                            // Lanjutkan, bukan mulai ulang: mulai ulang mencatat riwayat ganda
+                            Button(
+                                onClick = { viewModel.resumeSimulation() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = TertiaryGreen,
+                                    contentColor = Color(0xFF003314)
+                                )
+                            ) {
+                                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Lanjutkan", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                            StopMockButton(
+                                onClick = { viewModel.stopSimulation(context) },
+                                modifier = Modifier.weight(1f)
                             )
-                        ) {
-                            Icon(imageVector = Icons.Default.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Jeda", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
-
-                        Button(
-                            onClick = { viewModel.stopSimulation(context) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = DestructiveRed,
-                                contentColor = Color.White
-                            )
-                        ) {
-                            Icon(imageVector = Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Hentikan Mock", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        else -> {
+                            Button(
+                                onClick = { viewModel.startSimulation(context) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = TertiaryGreen,
+                                    contentColor = Color(0xFF003314)
+                                )
+                            ) {
+                                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Mulai Mock Lokasi", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun StopMockButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(48.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = DestructiveRed,
+            contentColor = Color.White
+        )
+    ) {
+        Icon(imageVector = Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("Hentikan Mock", fontSize = 13.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -328,7 +401,7 @@ private fun HomeMetricPill(
             .padding(horizontal = 8.dp, vertical = 6.dp)
     ) {
         Column {
-            Text(text = label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(text = label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 text = value,
                 fontSize = 11.sp,
@@ -336,6 +409,7 @@ private fun HomeMetricPill(
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 1.dp)
             )
         }

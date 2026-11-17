@@ -1,16 +1,19 @@
 package com.geoshift.locationsimulator.ui.components
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AltRoute
@@ -23,22 +26,28 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.geoshift.locationsimulator.ui.theme.OutlineHairline
 import com.geoshift.locationsimulator.ui.theme.PrimaryCyan
 import com.geoshift.locationsimulator.ui.theme.SurfaceContainerLow
 
 enum class NavigationTab(val label: String, val icon: ImageVector) {
-    HOME("Home", Icons.Default.Dashboard),
-    SEARCH("Search", Icons.Default.TravelExplore),
-    ROUTES("Routes", Icons.Default.AltRoute),
-    GPS_STATUS("Status", Icons.Default.SatelliteAlt),
-    HISTORY("History", Icons.Default.History),
-    SETTINGS("Settings", Icons.Default.Tune)
+    HOME("Beranda", Icons.Default.Dashboard),
+    SEARCH("Cari", Icons.Default.TravelExplore),
+    ROUTES("Rute", Icons.Default.AltRoute),
+    GPS_STATUS("Satelit", Icons.Default.SatelliteAlt),
+    HISTORY("Riwayat", Icons.Default.History),
+    SETTINGS("Atur", Icons.Default.Tune)
 }
 
 @Composable
@@ -46,49 +55,73 @@ fun BottomNavigationShell(
     selectedTab: NavigationTab,
     onTabSelected: (NavigationTab) -> Unit
 ) {
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SurfaceContainerLow.copy(alpha = 0.95f))
+            .background(SurfaceContainerLow)
             .navigationBarsPadding()
-            .height(64.dp)
-            .padding(horizontal = 8.dp)
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(OutlineHairline)
+        )
+        // Setiap tab mendapat lebar sama agar 6 item tetap muat di layar sempit
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceAround,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .padding(horizontal = 4.dp)
+                .selectableGroup(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            NavigationTab.values().forEach { tab ->
+            NavigationTab.entries.forEach { tab ->
                 val isSelected = tab == selectedTab
+                val contentColor by animateColorAsState(
+                    targetValue = if (isSelected) PrimaryCyan else MaterialTheme.colorScheme.onSurfaceVariant,
+                    label = "NavItemColor"
+                )
+                val indicatorColor by animateColorAsState(
+                    targetValue = if (isSelected) PrimaryCyan.copy(alpha = 0.18f) else Color.Transparent,
+                    label = "NavIndicatorColor"
+                )
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable { onTabSelected(tab) }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .selectable(
+                            selected = isSelected,
+                            role = Role.Tab,
+                            onClick = { onTabSelected(tab) }
+                        )
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp, 28.dp)
+                            .size(52.dp, 30.dp)
                             .clip(CircleShape)
-                            .background(if (isSelected) PrimaryCyan.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent),
+                            .background(indicatorColor),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = tab.icon,
-                            contentDescription = tab.label,
-                            tint = if (isSelected) PrimaryCyan else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
+                            contentDescription = null,
+                            tint = contentColor,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
 
                     Text(
                         text = tab.label,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isSelected) PrimaryCyan else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 10.sp
+                        color = contentColor,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
             }

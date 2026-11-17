@@ -1,9 +1,12 @@
 package com.geoshift.locationsimulator
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -20,8 +23,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,7 +35,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -73,21 +82,41 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainContent(viewModel: GeoShiftViewModel) {
-    var selectedTab by remember { mutableStateOf(NavigationTab.HOME) }
+    var selectedTab by rememberSaveable { mutableStateOf(NavigationTab.HOME) }
     val showDiagnostic by viewModel.showDiagnosticDialog.collectAsState()
     val diagnostic by viewModel.diagnostic.collectAsState()
     val errorMessage by viewModel.statusErrorMessage.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Simpan state rememberSaveable tiap tab (input rute, kueri cari, layer peta) saat berpindah tab
+    val tabStateHolder = rememberSaveableStateHolder()
 
     // Runtime Permission Request for Location & Notifications
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        // Permissions granted or denied handled gracefully without crashing
+    ) { result ->
+        val locationGranted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (locationGranted) {
+            viewModel.syncWithRealLocation(context)
+        } else {
+            coroutineScope.launch {
+                val action = snackbarHostState.showSnackbar(
+                    message = "Izin lokasi ditolak. Lokasi GPS asli & status satelit tidak tersedia.",
+                    actionLabel = "Pengaturan",
+                    duration = SnackbarDuration.Long
+                )
+                if (action == SnackbarResult.ActionPerformed) {
+                    context.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            .setData(Uri.fromParts("package", context.packageName, null))
+                    )
+                }
+            }
+        }
     }
-
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(Unit) {
         val permissions = mutableListOf(
@@ -125,8 +154,15 @@ fun MainContent(viewModel: GeoShiftViewModel) {
                     containerColor = SurfaceContainerHigh,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     action = {
-                        TextButton(onClick = { data.dismiss() }) {
-                            Text("Dismiss", color = PrimaryCyan)
+                        val actionLabel = data.visuals.actionLabel
+                        if (actionLabel != null) {
+                            TextButton(onClick = { data.performAction() }) {
+                                Text(actionLabel, color = PrimaryCyan)
+                            }
+                        } else {
+                            TextButton(onClick = { data.dismiss() }) {
+                                Text("Tutup", color = PrimaryCyan)
+                            }
                         }
                     }
                 ) {
@@ -145,6 +181,7 @@ fun MainContent(viewModel: GeoShiftViewModel) {
                 animationSpec = tween(250, easing = FastOutSlowInEasing),
                 label = "TabTransition"
             ) { tab ->
+                tabStateHolder.SaveableStateProvider(tab.name) {
                 when (tab) {
                     NavigationTab.HOME -> DashboardScreen(
                         viewModel = viewModel,
@@ -167,6 +204,7 @@ fun MainContent(viewModel: GeoShiftViewModel) {
                     NavigationTab.SETTINGS -> SettingsScreen(
                         viewModel = viewModel
                     )
+                }
                 }
             }
 

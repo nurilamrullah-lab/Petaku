@@ -51,7 +51,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,6 +78,7 @@ import com.geoshift.locationsimulator.util.MapTileSources
 import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.ITileSource
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
@@ -95,6 +98,20 @@ class RealLocationPulseOverlay(
     var pulseFraction: Float = 0f
 ) : Overlay() {
     private val point = Point()
+    // Paint dibuat sekali; draw() dipanggil setiap frame animasi
+    private val ripplePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3.5f
+    }
+    private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.WHITE
+        style = Paint.Style.FILL
+    }
+    private val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.rgb(255, 59, 48)
+        style = Paint.Style.FILL
+    }
 
     override fun draw(c: android.graphics.Canvas, osmv: MapView, shadow: Boolean) {
         if (shadow) return
@@ -110,44 +127,15 @@ class RealLocationPulseOverlay(
         val waveRadius = 14f + (pulseFraction * (maxWaveRadius - 14f))
         val waveAlpha = ((1f - pulseFraction) * 220).toInt().coerceIn(0, 255)
 
-        val ripplePaint = Paint().apply {
-            isAntiAlias = true
-            color = AndroidColor.argb(waveAlpha, 255, 59, 48) // Merah cerah
-            style = Paint.Style.STROKE
-            strokeWidth = 3.5f
-        }
+        ripplePaint.color = AndroidColor.argb(waveAlpha, 255, 59, 48)
         c.drawCircle(px, py, waveRadius, ripplePaint)
-
-        val haloPaint = Paint().apply {
-            isAntiAlias = true
-            color = AndroidColor.argb((waveAlpha * 0.35f).toInt(), 255, 59, 48)
-            style = Paint.Style.FILL
-        }
+        haloPaint.color = AndroidColor.argb((waveAlpha * 0.35f).toInt(), 255, 59, 48)
         c.drawCircle(px, py, waveRadius, haloPaint)
 
-        // 2. Lingkaran luar solid merah
-        val borderPaint = Paint().apply {
-            isAntiAlias = true
-            color = AndroidColor.WHITE
-            style = Paint.Style.FILL
-        }
-        c.drawCircle(px, py, 14f, borderPaint)
-
-        // 3. Inti merah terang
-        val corePaint = Paint().apply {
-            isAntiAlias = true
-            color = AndroidColor.rgb(255, 59, 48)
-            style = Paint.Style.FILL
-        }
+        // 2. Lingkaran luar putih, inti merah, titik pusat putih
+        c.drawCircle(px, py, 14f, whitePaint)
         c.drawCircle(px, py, 11f, corePaint)
-
-        // 4. Titik pusat putih kecil
-        val centerDot = Paint().apply {
-            isAntiAlias = true
-            color = AndroidColor.WHITE
-            style = Paint.Style.FILL
-        }
-        c.drawCircle(px, py, 3.5f, centerDot)
+        c.drawCircle(px, py, 3.5f, whitePaint)
     }
 }
 
@@ -160,17 +148,20 @@ fun TacticalMapCanvas(
     satellitesInUse: Int = 16,
     satellitesInView: Int = 24,
     modifier: Modifier = Modifier,
+    showStatusOverlays: Boolean = true,
     onLocationSelected: (Double, Double, String, String) -> Unit = { _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
     var currentMarker by remember { mutableStateOf<Marker?>(null) }
-    var selectedLayer by remember { mutableStateOf(MapLayerOption.GOOGLE_ROAD) }
+    // Disimpan per nama agar pilihan layer tidak kembali ke default saat pindah tab
+    var selectedLayerName by rememberSaveable { mutableStateOf(MapLayerOption.GOOGLE_ROAD.name) }
+    val selectedLayer = MapLayerOption.valueOf(selectedLayerName)
     var showLayerPicker by remember { mutableStateOf(false) }
 
     // Animasi kedip-kedip bergelombang untuk lokasi real-time HP
     val infiniteTransition = rememberInfiniteTransition(label = "RadarPulse")
-    val pulseFraction by infiniteTransition.animateFloat(
+    val pulseFraction = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -180,13 +171,16 @@ fun TacticalMapCanvas(
         label = "PulseFraction"
     )
 
-    val realLocOverlay = remember { RealLocationPulseOverlay(realLocation, pulseFraction) }
+    val realLocOverlay = remember { RealLocationPulseOverlay(realLocation) }
     realLocOverlay.realLocation = realLocation
-    realLocOverlay.pulseFraction = pulseFraction
 
-    // Re-draw map canvas on each animation pulse frame
-    LaunchedEffect(pulseFraction) {
-        mapViewInstance?.postInvalidate()
+    // Nilai animasi dibaca di coroutine (bukan saat komposisi) agar layar tidak
+    // di-recompose setiap frame; cukup gambar ulang peta.
+    LaunchedEffect(realLocOverlay) {
+        snapshotFlow { pulseFraction.value }.collect { fraction ->
+            realLocOverlay.pulseFraction = fraction
+            if (realLocOverlay.realLocation != null) mapViewInstance?.postInvalidate()
+        }
     }
 
     // Update marker on location change
@@ -213,6 +207,8 @@ fun TacticalMapCanvas(
                 MapView(ctx).apply {
                     setTileSource(selectedLayer.tileSource)
                     setMultiTouchControls(true)
+                    // Tombol zoom bawaan osmdroid tertutup panel bawah & duplikat kontrol kanan
+                    zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                     controller.setZoom(17.0)
                     controller.setCenter(GeoPoint(location.latitude, location.longitude))
 
@@ -410,7 +406,7 @@ fun TacticalMapCanvas(
         }
 
         // Floating Satellite & Precision HUD Pill (Top Left)
-        Box(
+        if (showStatusOverlays) Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(top = 16.dp, start = 12.dp)
@@ -438,7 +434,7 @@ fun TacticalMapCanvas(
         }
 
         // Active Layer Badge (Bottom Left)
-        Box(
+        if (showStatusOverlays) Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(bottom = 12.dp, start = 12.dp)
@@ -490,7 +486,7 @@ fun TacticalMapCanvas(
                                     RoundedCornerShape(10.dp)
                                 )
                                 .clickable {
-                                    selectedLayer = option
+                                    selectedLayerName = option.name
                                     showLayerPicker = false
                                 }
                                 .padding(12.dp),
