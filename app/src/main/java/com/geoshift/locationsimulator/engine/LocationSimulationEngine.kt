@@ -66,6 +66,14 @@ class LocationSimulationEngine(
     private var currentRoute: RouteSimulationTrack? = null
     private var currentWaypointIndex: Int = 0
 
+    private val _routeActive = MutableStateFlow(false)
+    /** true bila engine memegang rute (mode jalan); false = mock statis di satu titik. */
+    val routeActive: StateFlow<Boolean> = _routeActive.asStateFlow()
+
+    // Jangkar mock statis: jitter dihitung dari sini agar posisi tidak bergeser perlahan
+    private var anchorLat = _currentLocation.value.latitude
+    private var anchorLng = _currentLocation.value.longitude
+
     init {
         resolveProvider()
     }
@@ -95,6 +103,8 @@ class LocationSimulationEngine(
             timestamp = System.currentTimeMillis()
         )
         _currentLocation.value = updated
+        anchorLat = latitude
+        anchorLng = longitude
         if (_state.value == SimulationState.RUNNING) {
             activeProvider.pushLocation(updated)
         }
@@ -109,6 +119,8 @@ class LocationSimulationEngine(
             timestamp = System.currentTimeMillis()
         )
         _currentLocation.value = updated
+        anchorLat = latitude
+        anchorLng = longitude
         _state.value = SimulationState.RUNNING
         val initRes = activeProvider.initialize()
         if (initRes.isFailure) {
@@ -161,8 +173,16 @@ class LocationSimulationEngine(
         settingsRepository.setSpeedMultiplier(multiplier)
     }
 
+    fun clearRoute() {
+        currentRoute = null
+        currentWaypointIndex = 0
+        _routeProgress.value = 0f
+        _routeActive.value = false
+    }
+
     fun setRoute(track: RouteSimulationTrack) {
         currentRoute = track
+        _routeActive.value = true
         currentWaypointIndex = 0
         _routeProgress.value = 0f
         if (track.waypoints.isNotEmpty()) {
@@ -176,8 +196,8 @@ class LocationSimulationEngine(
         val speedMult = settingsRepository.speedMultiplier.value
         val jitterEnabled = settingsRepository.jitterEnabled.value
 
-        var newLat = baseLoc.latitude
-        var newLng = baseLoc.longitude
+        var newLat = anchorLat
+        var newLng = anchorLng
         var newBearing = baseLoc.bearing
         var calculatedSpeed = 0f
 
@@ -186,6 +206,8 @@ class LocationSimulationEngine(
             val totalPts = route.waypoints.size
             val targetWp = route.waypoints.getOrNull(currentWaypointIndex + 1)
             if (targetWp != null) {
+                newLat = baseLoc.latitude
+                newLng = baseLoc.longitude
                 // Move towards target waypoint
                 val dLat = targetWp.latitude - baseLoc.latitude
                 val dLng = targetWp.longitude - baseLoc.longitude

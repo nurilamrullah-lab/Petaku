@@ -48,10 +48,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -80,6 +82,9 @@ import com.geoshift.locationsimulator.ui.theme.SurfaceContainerLowest
 import com.geoshift.locationsimulator.util.DeviceLocationHelper
 import com.geoshift.locationsimulator.util.MapTileSources
 import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.ITileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
@@ -158,12 +163,36 @@ fun TacticalMapCanvas(
     // Tinggi area peta yang tertutup kartu atas/panel bawah; pin dipusatkan di area yang terlihat
     topObstruction: Dp = 0.dp,
     bottomObstruction: Dp = 0.dp,
+    onDeviceLocation: (Location) -> Unit = {},
     onLocationSelected: (Double, Double, String, String) -> Unit = { _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     val pinColor = MaterialTheme.colorScheme.primary.toArgb()
     var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
     var currentMarker by remember { mutableStateOf<Marker?>(null) }
+    var pinOnScreen by remember { mutableStateOf(true) }
+    val density = LocalDensity.current
+    val visibleTopPx by rememberUpdatedState(with(density) { topObstruction.toPx() })
+    val visibleBottomPx by rememberUpdatedState(with(density) { bottomObstruction.toPx() })
+    val targetPoint by rememberUpdatedState(GeoPoint(location.latitude, location.longitude))
+
+    // Pantau apakah pin target masih terlihat di area peta yang tidak tertutup panel
+    DisposableEffect(mapViewInstance) {
+        val mv = mapViewInstance ?: return@DisposableEffect onDispose {}
+        val pt = Point()
+        fun check() {
+            if (mv.width == 0) return
+            mv.projection.toPixels(targetPoint, pt)
+            pinOnScreen = pt.x in 0..mv.width &&
+                pt.y >= visibleTopPx && pt.y <= mv.height - visibleBottomPx
+        }
+        val listener = object : MapListener {
+            override fun onScroll(event: ScrollEvent?): Boolean { check(); return false }
+            override fun onZoom(event: ZoomEvent?): Boolean { check(); return false }
+        }
+        mv.addMapListener(listener)
+        onDispose { mv.removeMapListener(listener) }
+    }
     // Disimpan per nama agar pilihan layer tidak kembali ke default saat pindah tab
     var selectedLayerName by rememberSaveable { mutableStateOf(MapLayerOption.GOOGLE_ROAD.name) }
     val selectedLayer = MapLayerOption.valueOf(selectedLayerName)
@@ -306,25 +335,21 @@ fun TacticalMapCanvas(
                     map.controller.zoomTo((map.zoomLevelDouble - 1.0).coerceAtLeast(4.0), 250L)
                 }
             },
-            onCenterPin = {
-                mapViewInstance?.controller?.animateTo(GeoPoint(location.latitude, location.longitude), 17.0, 450L)
-            },
             onMyLocation = {
-                Toast.makeText(context, "Mencari sinyal GPS fisik perangkat...", Toast.LENGTH_SHORT).show()
+                // Hanya menggeser kamera; pin target tidak ikut berubah
                 DeviceLocationHelper.getRealDeviceLocation(context) { realLoc ->
                     if (realLoc != null) {
+                        onDeviceLocation(realLoc)
                         mapViewInstance?.controller?.animateTo(GeoPoint(realLoc.latitude, realLoc.longitude), 17.0, 450L)
-                        onLocationSelected(
-                            realLoc.latitude,
-                            realLoc.longitude,
-                            "Lokasi GPS Asli",
-                            "Terdeteksi dari sensor GPS HP (Akurasi ±${"%.1f".format(realLoc.accuracy)}m)"
-                        )
                     } else {
-                        Toast.makeText(context, "Sinyal GPS fisik belum terdeteksi", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Sinyal GPS HP belum terdeteksi", Toast.LENGTH_SHORT).show()
                     }
                 }
             },
+            onFocusTarget = {
+                mapViewInstance?.controller?.animateTo(GeoPoint(location.latitude, location.longitude), 17.0, 450L)
+            },
+            showFocusTarget = !pinOnScreen,
             onLayers = { showLayerPicker = true }
         )
 

@@ -36,11 +36,26 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsBike
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.GpsFixed
-import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.TwoWheeler
+import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.Place
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material3.Slider
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import kotlin.math.abs
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Notifications
@@ -232,32 +247,51 @@ fun JoystickPad(
 // MAP CONTROL RAIL
 // ==========================================
 
+/**
+ * Rel kontrol kanan peta: zoom, satu tombol GPS asli HP, fokus ke pin (hanya saat
+ * pin di luar layar) dan gaya peta. Ikon fokus sengaja berbentuk pin agar tidak
+ * tertukar dengan ikon GPS.
+ */
 @Composable
 fun MapControlRail(
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,
-    onCenterPin: () -> Unit,
     onMyLocation: () -> Unit,
-    onLayers: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onFocusTarget: (() -> Unit)? = null,
+    showFocusTarget: Boolean = true,
+    focusIcon: ImageVector = Icons.Outlined.Place,
+    focusDescription: String = "Fokus ke pin target",
+    onLayers: (() -> Unit)? = null
 ) {
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         FloatingGroup {
             RailButton(Icons.Default.Add, "Perbesar peta", onZoomIn)
-            HorizontalDivider(Modifier.width(28.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            HorizontalDivider(Modifier.width(24.dp), color = MaterialTheme.colorScheme.outlineVariant)
             RailButton(Icons.Default.Remove, "Perkecil peta", onZoomOut)
         }
         FloatingGroup {
-            RailButton(Icons.Default.GpsFixed, "Fokus ke pin target", onCenterPin, tint = MaterialTheme.colorScheme.primary)
-            HorizontalDivider(Modifier.width(28.dp), color = MaterialTheme.colorScheme.outlineVariant)
             RailButton(Icons.Default.MyLocation, "Lokasi GPS asli HP", onMyLocation, tint = MaterialTheme.colorScheme.secondary)
         }
-        FloatingGroup {
-            RailButton(Icons.Default.Layers, "Pilih gaya peta", onLayers)
+        if (onFocusTarget != null) {
+            AnimatedVisibility(
+                visible = showFocusTarget,
+                enter = scaleIn(spring(Spring.DampingRatioMediumBouncy)) + fadeIn(),
+                exit = scaleOut() + fadeOut()
+            ) {
+                FloatingGroup {
+                    RailButton(focusIcon, focusDescription, onFocusTarget, tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+        if (onLayers != null) {
+            FloatingGroup {
+                RailButton(Icons.Outlined.Layers, "Pilih gaya peta", onLayers)
+            }
         }
     }
 }
@@ -265,7 +299,7 @@ fun MapControlRail(
 @Composable
 private fun FloatingGroup(content: @Composable () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shadowElevation = 6.dp
@@ -281,8 +315,106 @@ private fun RailButton(
     onClick: () -> Unit,
     tint: Color = MaterialTheme.colorScheme.onSurface
 ) {
-    IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) {
+    IconButton(onClick = onClick, modifier = Modifier.size(44.dp)) {
         Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(22.dp))
+    }
+}
+
+// ==========================================
+// SPEED CONTROL (km/jam + preset moda)
+// ==========================================
+
+/** Kecepatan dasar engine (km/jam) pada pengali 1.0×. */
+const val ENGINE_BASE_SPEED_KMH = 50f
+
+enum class SpeedPreset(val label: String, val kmh: Float, val icon: ImageVector) {
+    WALK("Jalan", 5f, Icons.AutoMirrored.Filled.DirectionsWalk),
+    BIKE("Sepeda", 18f, Icons.AutoMirrored.Filled.DirectionsBike),
+    MOTOR("Motor", 40f, Icons.Filled.TwoWheeler),
+    CAR("Mobil", 60f, Icons.Filled.DirectionsCar)
+}
+
+@Composable
+fun SpeedControl(
+    speedMultiplier: Float,
+    onSpeedChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Nilai lokal agar slider mulus; disimpan ke pengaturan saat dilepas
+    var kmh by remember(speedMultiplier) { mutableFloatStateOf((speedMultiplier * ENGINE_BASE_SPEED_KMH).coerceIn(1f, 150f)) }
+    fun commit(value: Float) = onSpeedChange(value.roundToInt().coerceAtLeast(1) / ENGINE_BASE_SPEED_KMH)
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        var showSlider by rememberSaveable { mutableStateOf(false) }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClickLabel = if (showSlider) "Sembunyikan slider" else "Atur kecepatan manual") { showSlider = !showSlider }
+        ) {
+            Icon(Icons.Outlined.Speed, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Text("Kecepatan", style = MaterialTheme.typography.titleSmall)
+            Icon(
+                if (showSlider) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.weight(1f))
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                Text(
+                    "%d km/j".format(kmh.roundToInt()),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SpeedPreset.entries.forEach { preset ->
+                val selected = abs(kmh - preset.kmh) < 0.5f
+                val container by animateColorAsState(
+                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
+                    label = "PresetColor"
+                )
+                val content = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                Surface(
+                    onClick = {
+                        kmh = preset.kmh
+                        commit(preset.kmh)
+                    },
+                    shape = RoundedCornerShape(16.dp),
+                    color = container,
+                    contentColor = content,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        Icon(preset.icon, null, modifier = Modifier.size(20.dp))
+                        Text(preset.label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text(
+                            "${preset.kmh.roundToInt()} km/j",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = content.copy(alpha = 0.75f),
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+        AnimatedVisibility(visible = showSlider) {
+            Slider(
+                value = kmh,
+                onValueChange = { kmh = it },
+                onValueChangeFinished = { commit(kmh) },
+                valueRange = 1f..150f,
+                modifier = Modifier.semantics { contentDescription = "Kecepatan dalam km per jam" }
+            )
+        }
     }
 }
 
@@ -466,7 +598,7 @@ fun CoordinateInputDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.GpsFixed, null) },
+        icon = { Icon(Icons.Outlined.Place, null) },
         title = { Text("Atur koordinat") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

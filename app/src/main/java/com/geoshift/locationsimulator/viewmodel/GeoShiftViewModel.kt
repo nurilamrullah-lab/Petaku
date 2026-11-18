@@ -38,6 +38,7 @@ class GeoShiftViewModel : ViewModel() {
     val simulationState: StateFlow<SimulationState> = engine.state
     val simulationMode: StateFlow<SimulationMode> = engine.currentMode
     val routeProgress: StateFlow<Float> = engine.routeProgress
+    val routeActive: StateFlow<Boolean> = engine.routeActive
     val statusErrorMessage: StateFlow<String?> = engine.statusErrorMessage
 
     val satellites: StateFlow<List<GnssSatellite>> = gnssMonitor.satellites
@@ -113,6 +114,23 @@ class GeoShiftViewModel : ViewModel() {
         GeoShiftSimulationService.start(context)
         val cur = engine.currentLocation.value
         historyRepo.addHistory(cur.locationName, cur.address, cur.latitude, cur.longitude, "Simulation Active")
+    }
+
+    /** Mock diam di titik terpilih (menu Peta): rute dilepas agar posisi tidak berjalan. */
+    fun startStaticMock(context: Context) {
+        engine.clearRoute()
+        startSimulation(context)
+    }
+
+    /** Mock bergerak manual via joystick (menu Rute), mulai dari titik asal. */
+    fun startJoystickMock(lat: Double, lng: Double, name: String, context: Context) {
+        engine.clearRoute()
+        engine.setLocation(lat, lng, name, "Mode Joystick")
+        startSimulation(context)
+    }
+
+    fun setRealDeviceLocation(location: Location) {
+        _realDeviceLocation.value = location
     }
 
     fun pauseSimulation() {

@@ -78,15 +78,33 @@ class ScreenPreviewTest {
             shot(root, "%02d-%s".format(i + 1, label))
         }
 
-        // Kembali ke Peta: status aktif + joystick, lalu sheet stealth
+        // Peta: mock diam aktif
         val itemW = (root.width - 12 * d) / tabs.size
-        tap(root, 6 * d + itemW * 0.5f, root.height - 36 * d)
-        idle(800)
-        GeoShiftApplication.instance.simulationEngine.start()
+        fun openTab(i: Int) { tap(root, 6 * d + itemW * (i + 0.5f), root.height - 36 * d); idle(800) }
+        // Koordinat diukur pada screenshot lebar 723 px
+        val k = root.width / 723f
+        fun tapAt(x: Float, y: Float) { tap(root, x * k, y * k); idle(600) }
+        openTab(0)
+        tapAt(361f, 1358f) // Aktifkan Mock Lokasi
+        shot(root, "07-Peta-mock-aktif")
+        tapAt(361f, 1358f) // Hentikan Mock
         idle(500)
-        tap(root, root.width * (469f / 723f), root.height * (902f / 1568f))
-        shot(root, "07-Peta-aktif-joystick")
-        tap(root, root.width * (565f / 723f), root.height * (902f / 1568f))
-        shot(root, "08-Sheet-stealth")
+
+        // Rute: pilih tujuan cepat
+        openTab(2)
+        tapAt(556f, 1240f) // chip "Alun-Alun Jember"
+        waitReal(9000)
+        idle(6000)
+        shot(root, "08-Rute-tujuan")
     }
+
+    /** Kalkulasi rute berjalan di Dispatchers.IO; beri waktu nyata sambil memproses looper. */
+    private fun waitReal(ms: Long) {
+        val end = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < end) {
+            Thread.sleep(100)
+            idle(100)
+        }
+    }
+
 }
