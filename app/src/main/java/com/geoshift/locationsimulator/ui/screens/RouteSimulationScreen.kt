@@ -30,9 +30,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DirectionsBike
+import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.DirectionsWalk
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -583,7 +583,7 @@ fun RouteSimulationScreen(
                         InDriveTransportOption(
                             label = "Sepeda",
                             speed = "18 km/h",
-                            icon = Icons.Default.DirectionsBike,
+                            icon = Icons.AutoMirrored.Filled.DirectionsBike,
                             isSelected = transportMode == "Sepeda",
                             onClick = {
                                 transportMode = "Sepeda"
@@ -594,7 +594,7 @@ fun RouteSimulationScreen(
                         InDriveTransportOption(
                             label = "Jalan",
                             speed = "5 km/h",
-                            icon = Icons.Default.DirectionsWalk,
+                            icon = Icons.AutoMirrored.Filled.DirectionsWalk,
                             isSelected = transportMode == "Jalan",
                             onClick = {
                                 transportMode = "Jalan"

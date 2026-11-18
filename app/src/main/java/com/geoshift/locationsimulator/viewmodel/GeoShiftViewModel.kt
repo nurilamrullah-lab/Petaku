@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.math.cos
 
 class GeoShiftViewModel : ViewModel() {
 
@@ -187,5 +188,26 @@ class GeoShiftViewModel : ViewModel() {
             cur.latitude,
             cur.longitude
         )
+    }
+
+    /** Geser pin sejauh meter (timur/utara positif); dipakai joystick. */
+    fun nudgeLocation(eastMeters: Double, northMeters: Double) {
+        val cur = engine.currentLocation.value
+        val dLat = northMeters / METERS_PER_DEG_LAT
+        val dLng = eastMeters / (METERS_PER_DEG_LAT * cos(Math.toRadians(cur.latitude)).coerceAtLeast(0.01))
+        engine.setLocation(
+            (cur.latitude + dLat).coerceIn(-85.0, 85.0),
+            ((cur.longitude + dLng + 540.0) % 360.0) - 180.0,
+            "Mode Joystick",
+            "Dikendalikan manual via joystick"
+        )
+    }
+
+    fun setManualCoordinate(lat: Double, lng: Double) {
+        engine.setLocation(lat, lng, "Koordinat Manual", "%.6f, %.6f".format(lat, lng))
+    }
+
+    private companion object {
+        const val METERS_PER_DEG_LAT = 111_320.0
     }
 }

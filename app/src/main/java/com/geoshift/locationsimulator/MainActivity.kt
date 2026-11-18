@@ -13,7 +13,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.activity.SystemBarStyle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -42,7 +50,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -58,7 +66,6 @@ import com.geoshift.locationsimulator.ui.theme.CanvasBase
 import com.geoshift.locationsimulator.ui.theme.DestructiveRed
 import com.geoshift.locationsimulator.ui.theme.GeoShiftTheme
 import com.geoshift.locationsimulator.ui.theme.PrimaryCyan
-import com.geoshift.locationsimulator.ui.theme.SurfaceContainerHigh
 import com.geoshift.locationsimulator.viewmodel.GeoShiftViewModel
 
 class MainActivity : ComponentActivity() {
@@ -67,7 +74,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Bar sistem transparan dengan ikon terang: konten peta tampil penuh di balik status & nav bar
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
 
         setContent {
             val settingsRepo = remember { com.geoshift.locationsimulator.GeoShiftApplication.instance.settingsRepository }
@@ -149,24 +160,24 @@ fun MainContent(viewModel: GeoShiftViewModel) {
         snackbarHost = {
             SnackbarHost(hostState = snackbarHostState) { data ->
                 Snackbar(
-                    modifier = Modifier.padding(16.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    containerColor = SurfaceContainerHigh,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    containerColor = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
                     action = {
                         val actionLabel = data.visuals.actionLabel
                         if (actionLabel != null) {
                             TextButton(onClick = { data.performAction() }) {
-                                Text(actionLabel, color = PrimaryCyan)
+                                Text(actionLabel, color = MaterialTheme.colorScheme.inversePrimary, fontWeight = FontWeight.Bold)
                             }
                         } else {
                             TextButton(onClick = { data.dismiss() }) {
-                                Text("Tutup", color = PrimaryCyan)
+                                Text("Tutup", color = MaterialTheme.colorScheme.inversePrimary, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 ) {
-                    Text(data.visuals.message, style = MaterialTheme.typography.bodySmall)
+                    Text(data.visuals.message, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
@@ -176,9 +187,17 @@ fun MainContent(viewModel: GeoShiftViewModel) {
                 .fillMaxSize()
                 .padding(bottom = innerPadding.calculateBottomPadding())
         ) {
-            Crossfade(
+            AnimatedContent(
                 targetState = selectedTab,
-                animationSpec = tween(250, easing = FastOutSlowInEasing),
+                transitionSpec = {
+                    // Geser sedikit ke arah tab tujuan + pudar; terasa spasial tanpa berat
+                    val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                    val enter = fadeIn(tween(220, delayMillis = 60)) +
+                        slideInHorizontally(tween(320, easing = EaseOutCubic)) { w -> dir * w / 10 }
+                    val exit = fadeOut(tween(120)) +
+                        slideOutHorizontally(tween(320, easing = EaseOutCubic)) { w -> -dir * w / 10 }
+                    (enter togetherWith exit).using(SizeTransform(clip = false))
+                },
                 label = "TabTransition"
             ) { tab ->
                 tabStateHolder.SaveableStateProvider(tab.name) {
