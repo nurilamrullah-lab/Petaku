@@ -415,7 +415,7 @@ fun SettingsScreen(
     // ==========================================
     if (showThemeDialog) {
         val themes = listOf(
-            "1. Modern Material 3" to "Bersih, modern, standar terbaru",
+            "1. Modern Material 3" to "Dark premium, aksen teal taktis (bawaan)",
             "2. Dark OLED" to "Gelap pekat hemat baterai",
             "3. Glassmorphism 2.0" to "Transparan, blur premium",
             "4. Aurora Gradient" to "Gradient lembut, modern",

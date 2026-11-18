@@ -18,18 +18,21 @@ import com.geoshift.locationsimulator.data.model.SimulationState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class GeoShiftSimulationService : Service() {
 
     private val scope = CoroutineScope(Dispatchers.Main + Job())
+    private var stateJob: Job? = null
+    private var announced = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        createNotificationChannels()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -37,6 +40,7 @@ class GeoShiftSimulationService : Service() {
             ACTION_STOP -> {
                 GeoShiftApplication.instance.simulationEngine.stop()
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                cancelStartedNotification()
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -47,41 +51,38 @@ class GeoShiftSimulationService : Service() {
                 GeoShiftApplication.instance.simulationEngine.resume()
             }
             ACTION_START -> {
-                val notification = buildNotification("Initializing...", "1x")
+                val notification = buildServiceNotification()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-                    } else {
-                        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-                    }
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
 
-                observeEngineUpdates()
+                // Sekali per sesi: START berulang (ganti titik/rute) tidak memunculkannya lagi
+                if (!announced) {
+                    announced = true
+                    showStartedNotification()
+                }
+                observeEngineState()
             }
         }
         return START_STICKY
     }
 
-    private fun observeEngineUpdates() {
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    // Hanya memantau penghentian; notifikasi tidak di-refresh tiap perpindahan koordinat.
+    private fun observeEngineState() {
+        if (stateJob?.isActive == true) return
         val engine = GeoShiftApplication.instance.simulationEngine
-        val settings = GeoShiftApplication.instance.settingsRepository
-
-        scope.launch {
-            engine.currentLocation.collectLatest { loc ->
-                val speed = settings.speedMultiplier.value
-                val speedStr = String.format("%.0fx", speed)
-                val notification = buildNotification(loc.locationName, speedStr)
-                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                manager.notify(NOTIFICATION_ID, notification)
-            }
-        }
-
-        scope.launch {
+        stateJob = scope.launch {
             engine.state.collectLatest { state ->
                 if (state == SimulationState.STOPPED) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
+                    cancelStartedNotification()
                     showStoppedNotification(this@GeoShiftSimulationService)
                     stopSelf()
                 }
@@ -89,63 +90,100 @@ class GeoShiftSimulationService : Service() {
         }
     }
 
-    private fun buildNotification(locationName: String, speedStr: String): Notification {
+    private fun openAppPendingIntent(): PendingIntent {
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        val openPendingIntent = PendingIntent.getActivity(
+        return PendingIntent.getActivity(
             this, 0, openAppIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+    }
 
-        val pauseIntent = Intent(this, GeoShiftSimulationService::class.java).apply {
-            action = ACTION_PAUSE
-        }
-        val pausePendingIntent = PendingIntent.getService(
-            this, 1, pauseIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
+    private fun stopPendingIntent(): PendingIntent {
         val stopIntent = Intent(this, GeoShiftSimulationService::class.java).apply {
             action = ACTION_STOP
         }
-        val stopPendingIntent = PendingIntent.getService(
+        return PendingIntent.getService(
             this, 2, stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+    }
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+    /**
+     * Notifikasi wajib service foreground. Android tidak menghapusnya lewat timeout selama
+     * service berjalan, jadi dibuat senyap (channel MIN: tanpa suara, tanpa heads-up, tanpa ikon
+     * status bar di kebanyakan perangkat), tidak ongoing (bisa di-swipe di Android 14+), dan
+     * hanya diposting sekali.
+     */
+    private fun buildServiceNotification(): Notification {
+        return NotificationCompat.Builder(this, SERVICE_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("GeoShift simulation active")
-            .setContentText("Location: $locationName | Speed: $speedStr")
-            .setSubText("Location Simulator")
-            .setContentIntent(openPendingIntent)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(android.R.drawable.ic_media_pause, "Pause", pausePendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
+            .setContentTitle("Petaku berjalan di latar belakang")
+            .setContentIntent(openAppPendingIntent())
+            .setOngoing(false)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Hentikan", stopPendingIntent())
             .build()
     }
 
-    private fun createNotificationChannel() {
+    private fun showStartedNotification() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val loc = GeoShiftApplication.instance.simulationEngine.currentLocation.value
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("Mock lokasi aktif")
+            .setContentText(loc.locationName)
+            .setContentIntent(openAppPendingIntent())
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setTimeoutAfter(ANNOUNCE_TIMEOUT_MS)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .build()
+        manager.notify(STARTED_NOTIFICATION_ID, notification)
+    }
+
+    private fun cancelStartedNotification() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(STARTED_NOTIFICATION_ID)
+    }
+
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val alerts = NotificationChannel(
                 CHANNEL_ID,
                 getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = getString(R.string.notification_channel_desc)
-                setShowBadge(true)
+                setShowBadge(false)
             }
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+            val service = NotificationChannel(
+                SERVICE_CHANNEL_ID,
+                getString(R.string.notification_service_channel_name),
+                NotificationManager.IMPORTANCE_MIN
+            ).apply {
+                description = getString(R.string.notification_service_channel_desc)
+                setShowBadge(false)
+            }
+            manager.createNotificationChannel(alerts)
+            manager.createNotificationChannel(service)
         }
     }
 
     companion object {
         const val CHANNEL_ID = "geoshift_sim_channel"
+        const val SERVICE_CHANNEL_ID = "geoshift_service_channel"
         const val NOTIFICATION_ID = 1001
         const val STOPPED_NOTIFICATION_ID = 1002
+        const val STARTED_NOTIFICATION_ID = 1003
+        private const val ANNOUNCE_TIMEOUT_MS = 4000L
 
         const val ACTION_START = "com.geoshift.locationsimulator.START"
         const val ACTION_PAUSE = "com.geoshift.locationsimulator.PAUSE"
@@ -164,19 +202,13 @@ class GeoShiftSimulationService : Service() {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
 
-            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Notification.Builder(context, CHANNEL_ID)
-            } else {
-                @Suppress("DEPRECATION")
-                Notification.Builder(context)
-            }
-
-            val notif = builder
+            val notif = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle("GeoShift – Mock Lokasi Dihentikan")
-                .setContentText("Simulasi GPS dimatikan. Posisi dikembalikan ke sensor GPS asli HP.")
+                .setContentTitle("Mock lokasi dihentikan")
+                .setContentText("Posisi dikembalikan ke GPS asli HP.")
                 .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
+                .setTimeoutAfter(ANNOUNCE_TIMEOUT_MS)
                 .build()
 
             manager.notify(STOPPED_NOTIFICATION_ID, notif)

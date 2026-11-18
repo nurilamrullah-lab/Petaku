@@ -20,6 +20,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -39,7 +40,7 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.WifiTethering
-import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,19 +48,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -74,8 +82,12 @@ import com.geoshift.locationsimulator.ui.theme.SurfaceContainerLowest
 import com.geoshift.locationsimulator.util.DeviceLocationHelper
 import com.geoshift.locationsimulator.util.MapTileSources
 import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.ITileSource
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
@@ -95,6 +107,20 @@ class RealLocationPulseOverlay(
     var pulseFraction: Float = 0f
 ) : Overlay() {
     private val point = Point()
+    // Paint dibuat sekali; draw() dipanggil setiap frame animasi
+    private val ripplePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3.5f
+    }
+    private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.WHITE
+        style = Paint.Style.FILL
+    }
+    private val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.rgb(255, 59, 48)
+        style = Paint.Style.FILL
+    }
 
     override fun draw(c: android.graphics.Canvas, osmv: MapView, shadow: Boolean) {
         if (shadow) return
@@ -110,44 +136,15 @@ class RealLocationPulseOverlay(
         val waveRadius = 14f + (pulseFraction * (maxWaveRadius - 14f))
         val waveAlpha = ((1f - pulseFraction) * 220).toInt().coerceIn(0, 255)
 
-        val ripplePaint = Paint().apply {
-            isAntiAlias = true
-            color = AndroidColor.argb(waveAlpha, 255, 59, 48) // Merah cerah
-            style = Paint.Style.STROKE
-            strokeWidth = 3.5f
-        }
+        ripplePaint.color = AndroidColor.argb(waveAlpha, 255, 59, 48)
         c.drawCircle(px, py, waveRadius, ripplePaint)
-
-        val haloPaint = Paint().apply {
-            isAntiAlias = true
-            color = AndroidColor.argb((waveAlpha * 0.35f).toInt(), 255, 59, 48)
-            style = Paint.Style.FILL
-        }
+        haloPaint.color = AndroidColor.argb((waveAlpha * 0.35f).toInt(), 255, 59, 48)
         c.drawCircle(px, py, waveRadius, haloPaint)
 
-        // 2. Lingkaran luar solid merah
-        val borderPaint = Paint().apply {
-            isAntiAlias = true
-            color = AndroidColor.WHITE
-            style = Paint.Style.FILL
-        }
-        c.drawCircle(px, py, 14f, borderPaint)
-
-        // 3. Inti merah terang
-        val corePaint = Paint().apply {
-            isAntiAlias = true
-            color = AndroidColor.rgb(255, 59, 48)
-            style = Paint.Style.FILL
-        }
+        // 2. Lingkaran luar putih, inti merah, titik pusat putih
+        c.drawCircle(px, py, 14f, whitePaint)
         c.drawCircle(px, py, 11f, corePaint)
-
-        // 4. Titik pusat putih kecil
-        val centerDot = Paint().apply {
-            isAntiAlias = true
-            color = AndroidColor.WHITE
-            style = Paint.Style.FILL
-        }
-        c.drawCircle(px, py, 3.5f, centerDot)
+        c.drawCircle(px, py, 3.5f, whitePaint)
     }
 }
 
@@ -160,17 +157,50 @@ fun TacticalMapCanvas(
     satellitesInUse: Int = 16,
     satellitesInView: Int = 24,
     modifier: Modifier = Modifier,
+    showStatusOverlays: Boolean = true,
+    // Ruang yang dipakai kartu melayang di atas peta, agar rail kontrol tidak tertutup
+    controlsPadding: PaddingValues = PaddingValues(top = 16.dp),
+    // Tinggi area peta yang tertutup kartu atas/panel bawah; pin dipusatkan di area yang terlihat
+    topObstruction: Dp = 0.dp,
+    bottomObstruction: Dp = 0.dp,
+    onDeviceLocation: (Location) -> Unit = {},
     onLocationSelected: (Double, Double, String, String) -> Unit = { _, _, _, _ -> }
 ) {
     val context = LocalContext.current
+    val pinColor = MaterialTheme.colorScheme.primary.toArgb()
     var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
     var currentMarker by remember { mutableStateOf<Marker?>(null) }
-    var selectedLayer by remember { mutableStateOf(MapLayerOption.GOOGLE_ROAD) }
+    var pinOnScreen by remember { mutableStateOf(true) }
+    val density = LocalDensity.current
+    val visibleTopPx by rememberUpdatedState(with(density) { topObstruction.toPx() })
+    val visibleBottomPx by rememberUpdatedState(with(density) { bottomObstruction.toPx() })
+    val targetPoint by rememberUpdatedState(GeoPoint(location.latitude, location.longitude))
+
+    // Pantau apakah pin target masih terlihat di area peta yang tidak tertutup panel
+    DisposableEffect(mapViewInstance) {
+        val mv = mapViewInstance ?: return@DisposableEffect onDispose {}
+        val pt = Point()
+        fun check() {
+            if (mv.width == 0) return
+            mv.projection.toPixels(targetPoint, pt)
+            pinOnScreen = pt.x in 0..mv.width &&
+                pt.y >= visibleTopPx && pt.y <= mv.height - visibleBottomPx
+        }
+        val listener = object : MapListener {
+            override fun onScroll(event: ScrollEvent?): Boolean { check(); return false }
+            override fun onZoom(event: ZoomEvent?): Boolean { check(); return false }
+        }
+        mv.addMapListener(listener)
+        onDispose { mv.removeMapListener(listener) }
+    }
+    // Disimpan per nama agar pilihan layer tidak kembali ke default saat pindah tab
+    var selectedLayerName by rememberSaveable { mutableStateOf(MapLayerOption.GOOGLE_ROAD.name) }
+    val selectedLayer = MapLayerOption.valueOf(selectedLayerName)
     var showLayerPicker by remember { mutableStateOf(false) }
 
     // Animasi kedip-kedip bergelombang untuk lokasi real-time HP
     val infiniteTransition = rememberInfiniteTransition(label = "RadarPulse")
-    val pulseFraction by infiniteTransition.animateFloat(
+    val pulseFraction = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -180,13 +210,24 @@ fun TacticalMapCanvas(
         label = "PulseFraction"
     )
 
-    val realLocOverlay = remember { RealLocationPulseOverlay(realLocation, pulseFraction) }
+    val realLocOverlay = remember { RealLocationPulseOverlay(realLocation) }
     realLocOverlay.realLocation = realLocation
-    realLocOverlay.pulseFraction = pulseFraction
 
-    // Re-draw map canvas on each animation pulse frame
-    LaunchedEffect(pulseFraction) {
-        mapViewInstance?.postInvalidate()
+    // Nilai animasi dibaca di coroutine (bukan saat komposisi) agar layar tidak
+    // di-recompose setiap frame; cukup gambar ulang peta.
+    LaunchedEffect(realLocOverlay) {
+        snapshotFlow { pulseFraction.value }.collect { fraction ->
+            realLocOverlay.pulseFraction = fraction
+            if (realLocOverlay.realLocation != null) mapViewInstance?.postInvalidate()
+        }
+    }
+
+    // Geser titik tengah peta ke tengah area yang tidak tertutup kartu/panel
+    val centerOffsetPx = with(LocalDensity.current) { ((topObstruction - bottomObstruction) / 2).roundToPx() }
+    LaunchedEffect(centerOffsetPx, mapViewInstance) {
+        val mv = mapViewInstance ?: return@LaunchedEffect
+        mv.setMapCenterOffset(0, centerOffsetPx)
+        mv.controller.setCenter(GeoPoint(location.latitude, location.longitude))
     }
 
     // Update marker on location change
@@ -213,6 +254,8 @@ fun TacticalMapCanvas(
                 MapView(ctx).apply {
                     setTileSource(selectedLayer.tileSource)
                     setMultiTouchControls(true)
+                    // Tombol zoom bawaan osmdroid tertutup panel bawah & duplikat kontrol kanan
+                    zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                     controller.setZoom(17.0)
                     controller.setCenter(GeoPoint(location.latitude, location.longitude))
 
@@ -251,6 +294,7 @@ fun TacticalMapCanvas(
                     val m = Marker(this).apply {
                         position = GeoPoint(location.latitude, location.longitude)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        icon = createTargetPinDrawable(ctx, pinColor)
                         title = location.locationName.ifEmpty { "Target Location" }
                         isDraggable = true
                         setOnMarkerDragListener(object : Marker.OnMarkerDragListener {
@@ -276,141 +320,41 @@ fun TacticalMapCanvas(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Floating right-side precision map controls (Centered vertically and shifted inwards to center)
-        Column(
+        MapControlRail(
             modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Zoom In (+)
-            Surface(
-                shape = CircleShape,
-                color = SurfaceContainer.copy(alpha = 0.95f),
-                tonalElevation = 6.dp,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, OutlineHairline),
-                modifier = Modifier.size(46.dp)
-            ) {
-                IconButton(
-                    onClick = {
-                        mapViewInstance?.let { map ->
-                            val nextZoom = (map.zoomLevelDouble + 1.0).coerceAtMost(20.0)
-                            map.controller.setZoom(nextZoom)
-                            map.postInvalidate()
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Zoom In",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(24.dp)
-                    )
+                .align(Alignment.TopEnd)
+                .padding(controlsPadding)
+                .padding(end = 14.dp),
+            onZoomIn = {
+                mapViewInstance?.let { map ->
+                    map.controller.zoomTo((map.zoomLevelDouble + 1.0).coerceAtMost(20.0), 250L)
                 }
-            }
-
-            // Zoom Out (-)
-            Surface(
-                shape = CircleShape,
-                color = SurfaceContainer.copy(alpha = 0.95f),
-                tonalElevation = 6.dp,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, OutlineHairline),
-                modifier = Modifier.size(46.dp)
-            ) {
-                IconButton(
-                    onClick = {
-                        mapViewInstance?.let { map ->
-                            val nextZoom = (map.zoomLevelDouble - 1.0).coerceAtLeast(4.0)
-                            map.controller.setZoom(nextZoom)
-                            map.postInvalidate()
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Remove,
-                        contentDescription = "Zoom Out",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(24.dp)
-                    )
+            },
+            onZoomOut = {
+                mapViewInstance?.let { map ->
+                    map.controller.zoomTo((map.zoomLevelDouble - 1.0).coerceAtLeast(4.0), 250L)
                 }
-            }
-
-            // Lokasi Saya Asli (Real Device Hardware GPS)
-            Surface(
-                shape = CircleShape,
-                color = SurfaceContainer.copy(alpha = 0.95f),
-                tonalElevation = 6.dp,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.5.dp, PrimaryCyan),
-                modifier = Modifier.size(46.dp)
-            ) {
-                IconButton(
-                    onClick = {
-                        Toast.makeText(context, "Mencari sinyal GPS fisik perangkat...", Toast.LENGTH_SHORT).show()
-                        DeviceLocationHelper.getRealDeviceLocation(context) { realLoc ->
-                            if (realLoc != null) {
-                                val pt = GeoPoint(realLoc.latitude, realLoc.longitude)
-                                mapViewInstance?.controller?.animateTo(pt)
-                                mapViewInstance?.controller?.setZoom(17.0)
-                                onLocationSelected(
-                                    realLoc.latitude,
-                                    realLoc.longitude,
-                                    "Lokasi GPS Asli",
-                                    "Terdeteksi dari sensor GPS HP (Akurasi ±${"%.1f".format(realLoc.accuracy)}m)"
-                                )
-                                Toast.makeText(
-                                    context,
-                                    "Lokasi GPS HP: ${"%.4f".format(realLoc.latitude)}, ${"%.4f".format(realLoc.longitude)}",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            } else {
-                                val pt = GeoPoint(location.latitude, location.longitude)
-                                mapViewInstance?.controller?.animateTo(pt)
-                                Toast.makeText(context, "Sinyal GPS fisik belum terdeteksi", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MyLocation,
-                        contentDescription = "Lokasi Saya",
-                        tint = PrimaryCyan,
-                        modifier = Modifier.size(22.dp)
-                    )
+            },
+            onMyLocation = {
+                // Hanya menggeser kamera; pin target tidak ikut berubah
+                DeviceLocationHelper.getRealDeviceLocation(context) { realLoc ->
+                    if (realLoc != null) {
+                        onDeviceLocation(realLoc)
+                        mapViewInstance?.controller?.animateTo(GeoPoint(realLoc.latitude, realLoc.longitude), 17.0, 450L)
+                    } else {
+                        Toast.makeText(context, "Sinyal GPS HP belum terdeteksi", Toast.LENGTH_SHORT).show()
+                    }
                 }
-            }
-
-            // Pilihan Layer Peta (Google Maps Road, Satelit, Terrain, dll)
-            Surface(
-                shape = CircleShape,
-                color = SurfaceContainer.copy(alpha = 0.95f),
-                tonalElevation = 6.dp,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, OutlineHairline),
-                modifier = Modifier.size(46.dp)
-            ) {
-                IconButton(
-                    onClick = { showLayerPicker = true },
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Layers,
-                        contentDescription = "Pilihan Peta",
-                        tint = SecondaryBlue,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
-        }
+            },
+            onFocusTarget = {
+                mapViewInstance?.controller?.animateTo(GeoPoint(location.latitude, location.longitude), 17.0, 450L)
+            },
+            showFocusTarget = !pinOnScreen,
+            onLayers = { showLayerPicker = true }
+        )
 
         // Floating Satellite & Precision HUD Pill (Top Left)
-        Box(
+        if (showStatusOverlays) Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(top = 16.dp, start = 12.dp)
@@ -438,7 +382,7 @@ fun TacticalMapCanvas(
         }
 
         // Active Layer Badge (Bottom Left)
-        Box(
+        if (showStatusOverlays) Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(bottom = 12.dp, start = 12.dp)
@@ -455,45 +399,45 @@ fun TacticalMapCanvas(
             )
         }
 
-        // Dialog Pemilihan Layer Peta
+        // Sheet Pemilihan Layer Peta
         if (showLayerPicker) {
-            BasicAlertDialog(
-                onDismissRequest = { showLayerPicker = false }
+            ModalBottomSheet(
+                onDismissRequest = { showLayerPicker = false },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             ) {
                 Column(
                     modifier = Modifier
-                        .fillMaxWidth(0.9f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(SurfaceContainer)
-                        .border(1.dp, OutlineHairline, RoundedCornerShape(16.dp))
-                        .padding(20.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 24.dp)
                 ) {
                     Text(
-                        text = "Pilih Gaya Peta",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
+                        text = "Gaya Peta",
+                        style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(bottom = 14.dp)
+                        modifier = Modifier.padding(bottom = 12.dp)
                     )
 
-                    MapLayerOption.values().forEach { option ->
+                    MapLayerOption.entries.forEach { option ->
                         val isSelected = option == selectedLayer
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) SurfaceContainerHigh else SurfaceContainerLowest)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
                                 .border(
                                     1.dp,
-                                    if (isSelected) PrimaryCyan else OutlineHairline,
-                                    RoundedCornerShape(10.dp)
+                                    if (isSelected) PrimaryCyan else Color.Transparent,
+                                    RoundedCornerShape(18.dp)
                                 )
                                 .clickable {
-                                    selectedLayer = option
+                                    selectedLayerName = option.name
                                     showLayerPicker = false
                                 }
-                                .padding(12.dp),
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
@@ -502,12 +446,12 @@ fun TacticalMapCanvas(
                                     text = option.title,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = if (isSelected) PrimaryCyan else MaterialTheme.colorScheme.onSurface
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = option.subtitle,
                                     fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f) else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
                             }
@@ -515,7 +459,7 @@ fun TacticalMapCanvas(
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = null,
-                                    tint = PrimaryCyan,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -525,4 +469,35 @@ fun TacticalMapCanvas(
             }
         }
     }
+}
+
+/** Pin target modern: tetesan berwarna aksen tema dengan inti putih dan bayangan lembut. */
+private fun createTargetPinDrawable(context: Context, color: Int): android.graphics.drawable.BitmapDrawable {
+    val d = context.resources.displayMetrics.density
+    val w = (40 * d).toInt()
+    val h = (52 * d).toInt()
+    val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+    val c = android.graphics.Canvas(bmp)
+    val cx = w / 2f
+    val r = 15 * d
+    val cy = r + 3 * d
+
+    val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = AndroidColor.argb(60, 0, 0, 0) }
+    c.drawOval(cx - 7 * d, h - 5 * d, cx + 7 * d, h - 1 * d, shadow)
+
+    val path = android.graphics.Path().apply {
+        moveTo(cx, h - 3 * d)
+        cubicTo(cx - 4 * d, cy + r * 0.9f, cx - r, cy + r * 0.55f, cx - r, cy)
+        arcTo(cx - r, cy - r, cx + r, cy + r, 180f, 180f, false)
+        cubicTo(cx + r, cy + r * 0.55f, cx + 4 * d, cy + r * 0.9f, cx, h - 3 * d)
+        close()
+    }
+    c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color })
+    c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = AndroidColor.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 2 * d
+    })
+    c.drawCircle(cx, cy, 6 * d, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = AndroidColor.WHITE })
+    return android.graphics.drawable.BitmapDrawable(context.resources, bmp)
 }

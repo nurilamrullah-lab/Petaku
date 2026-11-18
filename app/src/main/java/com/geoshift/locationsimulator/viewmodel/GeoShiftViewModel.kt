@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.math.cos
 
 class GeoShiftViewModel : ViewModel() {
 
@@ -37,6 +38,7 @@ class GeoShiftViewModel : ViewModel() {
     val simulationState: StateFlow<SimulationState> = engine.state
     val simulationMode: StateFlow<SimulationMode> = engine.currentMode
     val routeProgress: StateFlow<Float> = engine.routeProgress
+    val routeActive: StateFlow<Boolean> = engine.routeActive
     val statusErrorMessage: StateFlow<String?> = engine.statusErrorMessage
 
     val satellites: StateFlow<List<GnssSatellite>> = gnssMonitor.satellites
@@ -114,6 +116,23 @@ class GeoShiftViewModel : ViewModel() {
         historyRepo.addHistory(cur.locationName, cur.address, cur.latitude, cur.longitude, "Simulation Active")
     }
 
+    /** Mock diam di titik terpilih (menu Peta): rute dilepas agar posisi tidak berjalan. */
+    fun startStaticMock(context: Context) {
+        engine.clearRoute()
+        startSimulation(context)
+    }
+
+    /** Mock bergerak manual via joystick (menu Rute), mulai dari titik asal. */
+    fun startJoystickMock(lat: Double, lng: Double, name: String, context: Context) {
+        engine.clearRoute()
+        engine.setLocation(lat, lng, name, "Mode Joystick")
+        startSimulation(context)
+    }
+
+    fun setRealDeviceLocation(location: Location) {
+        _realDeviceLocation.value = location
+    }
+
     fun pauseSimulation() {
         engine.pause()
     }
@@ -177,5 +196,36 @@ class GeoShiftViewModel : ViewModel() {
 
     fun toggleFavorite(id: Long, current: Boolean) {
         historyRepo.toggleFavorite(id, current)
+    }
+
+    fun toggleCurrentLocationFavorite(): Boolean {
+        val cur = engine.currentLocation.value
+        return historyRepo.toggleFavoriteAt(
+            cur.locationName.ifEmpty { "Titik Favorit" },
+            cur.address.ifEmpty { "%.5f, %.5f".format(cur.latitude, cur.longitude) },
+            cur.latitude,
+            cur.longitude
+        )
+    }
+
+    /** Geser pin sejauh meter (timur/utara positif); dipakai joystick. */
+    fun nudgeLocation(eastMeters: Double, northMeters: Double) {
+        val cur = engine.currentLocation.value
+        val dLat = northMeters / METERS_PER_DEG_LAT
+        val dLng = eastMeters / (METERS_PER_DEG_LAT * cos(Math.toRadians(cur.latitude)).coerceAtLeast(0.01))
+        engine.setLocation(
+            (cur.latitude + dLat).coerceIn(-85.0, 85.0),
+            ((cur.longitude + dLng + 540.0) % 360.0) - 180.0,
+            "Mode Joystick",
+            "Dikendalikan manual via joystick"
+        )
+    }
+
+    fun setManualCoordinate(lat: Double, lng: Double) {
+        engine.setLocation(lat, lng, "Koordinat Manual", "%.6f, %.6f".format(lat, lng))
+    }
+
+    private companion object {
+        const val METERS_PER_DEG_LAT = 111_320.0
     }
 }

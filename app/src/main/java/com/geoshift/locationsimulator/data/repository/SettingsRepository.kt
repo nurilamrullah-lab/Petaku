@@ -2,6 +2,7 @@ package com.geoshift.locationsimulator.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.geoshift.locationsimulator.ui.theme.DEFAULT_UI_THEME
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,7 +32,7 @@ class SettingsRepository(context: Context) {
     val mapsApiKey: StateFlow<String> = _mapsApiKey.asStateFlow()
 
     // Preferences Baru
-    private val _uiTheme = MutableStateFlow(prefs.getString(KEY_UI_THEME, "Dark Navy (AMOLED)") ?: "Dark Navy (AMOLED)")
+    private val _uiTheme = MutableStateFlow(prefs.getString(KEY_UI_THEME, DEFAULT_UI_THEME) ?: DEFAULT_UI_THEME)
     val uiTheme: StateFlow<String> = _uiTheme.asStateFlow()
 
     private val _defaultAnchorName = MutableStateFlow(prefs.getString(KEY_DEFAULT_ANCHOR_NAME, "Jember Kidul (Ruko Gajah Mada)") ?: "Jember Kidul (Ruko Gajah Mada)")

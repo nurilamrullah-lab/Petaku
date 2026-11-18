@@ -68,6 +68,34 @@ class LocationHistoryRepository(context: Context) {
         refresh()
     }
 
+    fun findFavoriteNear(lat: Double, lng: Double): HistoryItem? =
+        _historyFlow.value.firstOrNull {
+            it.isFavorite && abs(it.latitude - lat) < 0.0001 && abs(it.longitude - lng) < 0.0001
+        }
+
+    /** Simpan/hapus titik sebagai favorit. Mengembalikan status favorit yang baru. */
+    fun toggleFavoriteAt(title: String, subtitle: String, lat: Double, lng: Double): Boolean {
+        findFavoriteNear(lat, lng)?.let {
+            toggleFavorite(it.id, true)
+            return false
+        }
+        dbHelper.insert(
+            HistoryItem(
+                title = title,
+                subtitle = subtitle,
+                latitude = lat,
+                longitude = lng,
+                timestamp = System.currentTimeMillis(),
+                durationMinutes = 0,
+                mode = "Favorit",
+                isFavorite = true,
+                categoryGroup = "Today"
+            )
+        )
+        refresh()
+        return true
+    }
+
     fun exportToGpx(context: Context): File? {
         val list = _historyFlow.value
         if (list.isEmpty()) return null

@@ -31,16 +31,20 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,6 +83,31 @@ fun LocationHistoryScreen(
     val simulationMode by viewModel.simulationMode.collectAsState()
 
     val favoriteCount = remember(historyItems) { historyItems.count { it.isFavorite } }
+    var showClearConfirm by remember { mutableStateOf(false) }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            icon = { Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = DestructiveRed) },
+            title = { Text("Hapus semua riwayat?") },
+            text = {
+                Text(
+                    "${historyItems.size} entri, termasuk $favoriteCount favorit, akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearConfirm = false
+                    viewModel.clearAllHistory()
+                    Toast.makeText(context, "Seluruh riwayat berhasil dibersihkan", Toast.LENGTH_SHORT).show()
+                }) { Text("Hapus Semua", color = DestructiveRed, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("Batal", color = PrimaryCyan) }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -182,7 +211,7 @@ fun LocationHistoryScreen(
                                     .padding(10.dp)
                             ) {
                                 Column {
-                                    Text("Total Entri", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Total Entri", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text("${historyItems.size} Lokasi", fontSize = 14.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = PrimaryCyan)
                                 }
                             }
@@ -195,7 +224,7 @@ fun LocationHistoryScreen(
                                     .padding(10.dp)
                             ) {
                                 Column {
-                                    Text("Favorit", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Favorit", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text("$favoriteCount Disimpan", fontSize = 14.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = WarningAmber)
                                 }
                             }
@@ -208,7 +237,7 @@ fun LocationHistoryScreen(
                                     .padding(10.dp)
                             ) {
                                 Column {
-                                    Text("Status DB", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Status DB", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text("Sinkron", fontSize = 14.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = TertiaryGreen)
                                 }
                             }
@@ -237,11 +266,8 @@ fun LocationHistoryScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(DestructiveRed.copy(alpha = 0.15f))
-                                .clickable {
-                                    viewModel.clearAllHistory()
-                                    Toast.makeText(context, "Seluruh riwayat berhasil dibersihkan", Toast.LENGTH_SHORT).show()
-                                }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                .clickable { showClearConfirm = true }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(imageVector = Icons.Default.DeleteSweep, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(14.dp))
