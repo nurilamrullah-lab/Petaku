@@ -1,6 +1,22 @@
 # Petaku (GeoShift) - Tactical Location Simulator for Android
 
-Aplikasi simulator dan manipulasi lokasi GPS stealth (anti-deteksi) presisi tinggi untuk perangkat Android, dirancang khusus untuk optimasi hardware chipset Qualcomm Snapdragon / GNSS terhubung antena eksternal (ASUS ZenFone Max Pro M1 / Android 16).
+Aplikasi simulator dan manipulasi lokasi GPS stealth (anti-deteksi) presisi tinggi untuk perangkat Android, dirancang khusus untuk optimasi hardware chipset Qualcomm Snapdragon / GNSS terhubung antena eksternal (diuji pada ASUS Zenfone Max Pro M2 / Android 16 LineageOS).
+
+---
+
+## Alur Kerja Aplikasi
+
+Navigasi bawah terdiri dari 6 menu: **Peta · Cari · Rute · Satelit · Riwayat · Atur**. Peran layar dipisah dengan tegas:
+
+| Kebutuhan | Menu | Isi |
+|---|---|---|
+| Mock lokasi **diam** di satu titik | **Peta** (Home) | Pilih titik di peta / koordinat, lalu aktifkan atau hentikan mock. Tanpa slider kecepatan dan tanpa joystick. |
+| Simulasi **bergerak** | **Rute** | Mode Rute (asal → titik singgah → tujuan) atau mode Joystick, pengaturan kecepatan km/j, dan kontrol perjalanan. |
+
+1. **Mock statis** — buka *Peta*, ketuk/tekan lama peta atau isi koordinat, lalu tekan *Aktifkan Mock Lokasi*. Posisi tetap di titik tersebut sampai dihentikan.
+2. **Simulasi rute** — buka *Rute*, tentukan asal dan tujuan (opsional: tambah titik singgah), atur kecepatan, lalu *Mulai Perjalanan*. Perjalanan bisa *Jeda*, *Lanjutkan*, atau *Hentikan*.
+3. **Joystick** — di *Rute*, pilih mode *Joystick* lalu *Mulai Joystick* untuk menggeser posisi secara manual dari titik asal.
+4. Saat dihentikan, posisi dikembalikan ke GPS asli HP.
 
 ---
 
@@ -8,12 +24,18 @@ Aplikasi simulator dan manipulasi lokasi GPS stealth (anti-deteksi) presisi ting
 
 - **Peta Interaktif Layar Penuh (Tactical Map HUD)**:
   - Antarmuka peta interaktif berbasis OpenStreetMap / Google Maps (Roadmap, Satellite, Hybrid, Terrain).
-  - Kontrol presisi di sisi kanan tengah: Zoom In (+), Zoom Out (-), Fokus Pin Target, Fokus GPS HP Asli, dan Pemilih Layer Peta.
+  - Rel kontrol ringkas di sisi kanan: Zoom In (+), Zoom Out (-), **satu** tombol GPS HP asli (hanya menggeser kamera, pin target tidak ikut berubah), tombol fokus, dan pemilih layer peta.
+  - Di *Peta*, tombol fokus pin hanya muncul ketika pin target berada di luar layar. Di *Rute*, tombol fokus menampilkan seluruh rute atau mengikuti posisi simulasi.
   - Floating HUD telemetri satelit real-time (*In-Use / In-View SATS*), rasio SNR, dan status lock GNSS.
-- **Simulasi Rute Bergaya inDrive**:
-  - Penentuan titik jemput (A) dan tujuan (B) langsung dari peta atau input alamat.
-  - Rute jalan raya otomatis menggunakan OpenStreetMap OSRM Routing Engine.
-  - Estimasi jarak, durasi, dan kecepatan simulasi perjalanan (1x hingga 5x) dengan marker animasi bergerak.
+- **Simulasi Rute & Pergerakan (menu Rute)**:
+  - Penentuan titik asal (A), tujuan (B), dan titik singgah langsung dari peta atau input alamat.
+  - Rute jalan raya otomatis menggunakan OpenStreetMap OSRM Routing Engine, digabung per segmen asal → singgah → tujuan.
+  - Kecepatan dalam **km/j** dengan preset kendaraan (Jalan 5, Sepeda 18, Motor 40, Mobil 60 km/j) dan slider 1–150 km/j.
+  - Kontrol perjalanan Mulai / Jeda / Lanjutkan / Hentikan, estimasi jarak & durasi, serta marker animasi bergerak.
+  - Mode Joystick untuk pergerakan manual.
+- **Notifikasi yang Tidak Mengganggu**:
+  - Saat mock aktif, notifikasi pemberitahuan muncul **sekali** lalu otomatis hilang dalam 4 detik (bisa juga di-swipe).
+  - Notifikasi wajib service latar belakang dibuat senyap (prioritas minimum, tidak ongoing) dan tidak diperbarui setiap perpindahan koordinat, sehingga mock tetap berjalan stabil di background.
 - **Stealth & Anti-Deteksi**:
   - Algoritma *Atmospheric Multipath Jitter* (fluktuasi akurasi ±1.5m) untuk mencegah deteksi mock location oleh aplikasi ride-hailing / anti-fraud.
   - Injeksi FusedLocationProvider dan Mock Location Provider tingkat sistem.
@@ -48,12 +70,17 @@ Aplikasi simulator dan manipulasi lokasi GPS stealth (anti-deteksi) presisi ting
 ## Build & Instalasi
 
 ```bash
-# Kompilasi Release APK
+# Kompilasi Debug / Release APK
+./gradlew assembleDebug
 ./gradlew assembleRelease
 
-# Install ke Perangkat via ADB
-adb install -r GeoShift-release.apk
+# Install ke perangkat via ADB
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+Setelah instalasi, jadikan Petaku sebagai **aplikasi lokasi palsu** di *Opsi Pengembang → Pilih aplikasi lokasi palsu*, lalu izinkan akses lokasi dan notifikasi.
+
+Telah diuji pada perangkat fisik **ASUS Zenfone Max Pro M2 (Android 16, LineageOS)**.
 
 ---
 *Pengembangan & Modifikasi oleh Nuril Amrullah (Bang Nuril)*
