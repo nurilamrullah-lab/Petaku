@@ -2,5 +2,7 @@
     <string name="app_name">GeoShift</string>
     <string name="app_subtitle">Location Simulator</string>
     <string name="notification_channel_name">GeoShift Simulation</string>
+    <string name="notification_service_channel_name">Layanan latar belakang</string>
+    <string name="notification_service_channel_desc">Notifikasi senyap yang menjaga mock lokasi tetap berjalan</string>
     <string name="notification_channel_desc">Active mock location broadcast notifications</string>
 </resources>
